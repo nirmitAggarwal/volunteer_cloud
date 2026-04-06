@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import uuid
 import psutil
@@ -16,8 +17,8 @@ init(autoreset=True)
 # ==========================================
 # CONFIGURATION
 # ==========================================
-# Change this to the IP of the Server Laptop
-SERVER_URL = "http://127.0.0.1:3000" 
+# Change this to the IP of the Server Laptop or set VOLUNTEER_SERVER_URL
+SERVER_URL = os.environ.get("VOLUNTEER_SERVER_URL", "http://127.0.0.1:3000")
 WORKER_ID = str(uuid.uuid4())[:8]
 
 # ==========================================
@@ -184,7 +185,14 @@ def task_loop():
 
         except requests.exceptions.RequestException:
             print(f"{Fore.RED}Connection to server lost. Retrying...{Style.RESET_ALL}", end='\r')
-            time.sleep(3)
+            try:
+                time.sleep(3)
+            except KeyboardInterrupt:
+                print(f"\n{Fore.YELLOW}Worker interrupted by user. Exiting...{Style.RESET_ALL}")
+                break
+        except KeyboardInterrupt:
+            print(f"\n{Fore.YELLOW}Worker interrupted by user. Exiting...{Style.RESET_ALL}")
+            break
 
 # ==========================================
 # MAIN ENTRY POINT
@@ -207,8 +215,18 @@ if __name__ == '__main__':
                 break
         except requests.exceptions.RequestException:
             print(f"{Fore.RED}Server unreachable. Retrying in 5 seconds...{Style.RESET_ALL}")
-            time.sleep(5)
+            try:
+                time.sleep(5)
+            except KeyboardInterrupt:
+                print(f"\n{Fore.YELLOW}Worker interrupted by user during retry. Exiting...{Style.RESET_ALL}")
+                sys.exit(0)
+        except KeyboardInterrupt:
+            print(f"\n{Fore.YELLOW}Worker interrupted by user. Exiting...{Style.RESET_ALL}")
+            sys.exit(0)
             
     # 2. Start Threads
     threading.Thread(target=heartbeat_loop, daemon=True).start()
-    task_loop()
+    try:
+        task_loop()
+    except KeyboardInterrupt:
+        print(f"\n{Fore.YELLOW}Worker interrupted by user. Exiting...{Style.RESET_ALL}")

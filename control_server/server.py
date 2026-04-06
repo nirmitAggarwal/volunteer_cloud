@@ -18,10 +18,11 @@ log.disabled = True # Disable default flask logs for custom clean logs
 STORAGE_DIR = 'storage'
 WORKER_LOGS = os.path.join(STORAGE_DIR, 'worker_logs.csv')
 SESSION_LOGS = os.path.join(STORAGE_DIR, 'session_logs.csv')
+WORKER_INFO = os.path.join(STORAGE_DIR, 'worker_info.csv')
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
 # In-Memory State
-state_lock = threading.Lock()
+state_lock = threading.RLock()
 workers = {} # worker_id -> dict
 tasks = {}   # task_id -> dict
 sessions = {} # session_id -> dict
@@ -35,6 +36,66 @@ def init_csv(filepath, headers):
 
 init_csv(WORKER_LOGS, ['timestamp', 'worker_id', 'session_id', 'task_id', 'task_type', 'benchmark_score', 'start_time', 'end_time', 'time_taken', 'points_earned', 'status', 'progress_last_seen', 'error_message'])
 init_csv(SESSION_LOGS, ['worker_id', 'session_id', 'connected_at', 'disconnected_at', 'uptime_seconds', 'total_tasks_done', 'total_points'])
+init_csv(WORKER_INFO, ['worker_id', 'hostname', 'os', 'cpu', 'cores', 'ram', 'benchmark_score', 'ip', 'last_seen', 'total_points', 'total_tasks', 'known_since'])
+
+
+def load_csv_rows(filepath):
+    if not os.path.exists(filepath):
+        return []
+    with open(filepath, 'r', newline='') as f:
+        reader = csv.DictReader(f)
+        return [row for row in reader]
+def save_worker_info():
+    headers = ['worker_id', 'hostname', 'os', 'cpu', 'cores', 'ram', 'benchmark_score', 'ip', 'last_seen', 'total_points', 'total_tasks', 'known_since']
+    rows = []
+    with state_lock:
+        for worker in workers.values():
+            rows.append({
+                'worker_id': worker['worker_id'],
+                'hostname': worker['hostname'],
+                'os': worker['os'],
+                'cpu': worker['cpu'],
+                'cores': worker['cores'],
+                'ram': worker['ram'],
+                'benchmark_score': worker['benchmark_score'],
+                'ip': worker.get('ip', ''),
+                'last_seen': worker.get('last_heartbeat', 0),
+                'total_points': worker.get('total_points', 0),
+                'total_tasks': worker.get('total_tasks', 0),
+                'known_since': worker.get('known_since', 0)
+            })
+    with open(WORKER_INFO, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(rows)
+def load_known_workers():
+    for row in load_csv_rows(WORKER_INFO):
+        try:
+            cores = int(row.get('cores', 0))
+            bench = int(row.get('benchmark_score', 0))
+            points = float(row.get('total_points', 0))
+            total_tasks = int(row.get('total_tasks', 0))
+            known_since = float(row.get('known_since', 0))
+        except ValueError:
+            continue
+        workers[row['worker_id']] = {
+            'worker_id': row['worker_id'],
+            'hostname': row['hostname'],
+            'os': row['os'],
+            'cpu': row['cpu'],
+            'cores': cores,
+            'ram': row['ram'],
+            'benchmark_score': bench,
+            'ip': row.get('ip', ''),
+            'status': 'offline',
+            'last_heartbeat': 0,
+            'current_task': None,
+            'current_session': None,
+            'total_points': points,
+            'total_tasks': total_tasks,
+            'known_since': known_since
+        }
+load_known_workers()
 
 def log_print(msg, level="INFO"):
     colors = {"INFO": Fore.CYAN, "SUCCESS": Fore.GREEN, "WARN": Fore.YELLOW, "ERROR": Fore.RED, "TASK": Fore.MAGENTA}
@@ -46,14 +107,17 @@ def fault_tolerance_loop():
     while True:
         time.sleep(2)
         current_time = time.time()
+        updated = False
         with state_lock:
             for wid, w in list(workers.items()):
-                if w['status'] == 'offline': continue
+                if w['status'] == 'offline':
+                    continue
                 
                 # Check Heartbeat
                 if current_time - w['last_heartbeat'] > 6:
                     log_print(f"Worker {w['hostname']} ({wid}) missed heartbeat. Marking offline.", "ERROR")
                     w['status'] = 'offline'
+                    updated = True
                     
                     # Log Session
                     session = sessions.get(w['current_session'])
@@ -73,6 +137,8 @@ def fault_tolerance_loop():
                             log_print(f"Task {tid} requeued (Worker failed). Progress was {task['progress']}%", "WARN")
                     
                     w['current_task'] = None
+        if updated:
+            save_worker_info()
 
 threading.Thread(target=fault_tolerance_loop, daemon=True).start()
 
@@ -100,17 +166,30 @@ def register_worker():
     
     with state_lock:
         if wid not in workers:
-            workers[wid] = {"total_points": 0, "total_tasks": 0}
+            workers[wid] = {
+                "worker_id": wid,
+                "total_points": 0,
+                "total_tasks": 0,
+                "known_since": time.time()
+            }
         
         workers[wid].update({
-            "worker_id": wid, "hostname": data['hostname'], "os": data['os'],
-            "cpu": data['cpu'], "cores": data['cores'], "ram": data['ram'],
-            "benchmark_score": data['benchmark_score'], "ip": request.remote_addr,
-            "status": "online", "last_heartbeat": time.time(),
-            "current_task": None, "current_session": session_id
+            "worker_id": wid,
+            "hostname": data['hostname'],
+            "os": data['os'],
+            "cpu": data['cpu'],
+            "cores": data['cores'],
+            "ram": data['ram'],
+            "benchmark_score": data['benchmark_score'],
+            "ip": request.remote_addr,
+            "status": "online",
+            "last_heartbeat": time.time(),
+            "current_task": None,
+            "current_session": session_id
         })
         
         sessions[session_id] = {"connected_at": time.time(), "tasks_done": 0, "points": 0}
+        save_worker_info()
     
     log_print(f"Worker Connected: {data['hostname']} (Bench: {data['benchmark_score']})", "SUCCESS")
     return jsonify({"status": "registered", "session_id": session_id})
@@ -164,7 +243,7 @@ def task_result():
         
         if not task or not worker: return jsonify({"error": "Invalid state"})
         
-        pts = worker['benchmark_score'] * time_taken if success else 0
+        pts = (worker['benchmark_score'] * time_taken / 100) if success else 0
         task.update({
             "status": "completed" if success else "failed",
             "progress": 100 if success else task['progress'],
@@ -178,6 +257,7 @@ def task_result():
             sessions[worker['current_session']]['tasks_done'] += 1
             sessions[worker['current_session']]['points'] += pts
             log_print(f"Task {tid} completed by {worker['hostname']} in {time_taken}s. (+{pts} pts)", "SUCCESS")
+            save_worker_info()
         
         # Write to CSV
         with open(WORKER_LOGS, 'a', newline='') as f:
@@ -217,6 +297,45 @@ def system_stats():
             "workers": list(workers.values()),
             "tasks": list(tasks.values())
         })
+
+@app.route('/api/analysis')
+def analysis_data():
+    with state_lock:
+        workers_list = list(workers.values())
+        stats = {
+            'total_workers': len(workers_list),
+            'active_workers': sum(1 for w in workers_list if w['status'] != 'offline'),
+            'offline_workers': sum(1 for w in workers_list if w['status'] == 'offline'),
+            'total_points': sum(w.get('total_points', 0) for w in workers_list),
+            'total_tasks': sum(w.get('total_tasks', 0) for w in workers_list),
+            'task_status': {
+                'running': sum(1 for t in tasks.values() if t['status'] == 'running'),
+                'queued': sum(1 for t in tasks.values() if t['status'] == 'queued'),
+                'completed': sum(1 for t in tasks.values() if t['status'] == 'completed'),
+                'failed': sum(1 for t in tasks.values() if t['status'] == 'failed')
+            },
+            'workers': [
+                {
+                    'worker_id': w['worker_id'],
+                    'hostname': w['hostname'],
+                    'status': w['status'],
+                    'benchmark_score': w['benchmark_score'],
+                    'total_points': w.get('total_points', 0),
+                    'total_tasks': w.get('total_tasks', 0),
+                    'last_seen': w.get('last_heartbeat', 0),
+                    'ip': w.get('ip', ''),
+                    'os': w['os'],
+                    'cpu': w['cpu'],
+                    'known_since': w.get('known_since', 0)
+                }
+                for w in workers_list
+            ]
+        }
+    return jsonify(stats)
+
+@app.route('/analysis')
+def analysis_page():
+    return render_template('analysis.html')
 
 @app.route('/')
 @app.route('/dashboard')
