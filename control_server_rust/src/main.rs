@@ -10,6 +10,7 @@ use std::fs::{self, OpenOptions};
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tera::{Context, Tera};
+use tokio::task;
 use uuid::Uuid;
 
 const STORAGE_DIR: &str = "storage";
@@ -121,7 +122,7 @@ fn load_csv_rows(filepath: &str) -> Vec<HashMap<String, String>> {
     rows
 }
 
-fn save_worker_info(state: &AppState) {
+async fn save_worker_info(state: &AppState) {
     let headers = [
         "worker_id",
         "hostname",
@@ -137,34 +138,39 @@ fn save_worker_info(state: &AppState) {
         "known_since",
     ];
 
-    let workers = state.workers.read().unwrap();
-
-    let mut wtr = WriterBuilder::new()
-        .has_headers(true)
-        .from_path(WORKER_INFO)
-        .unwrap();
-
-    wtr.write_record(&headers).unwrap();
-
-    for w in workers.values() {
-        wtr.write_record(&[
-            &w.worker_id,
-            &w.hostname,
-            &w.os,
-            &w.cpu,
-            &w.cores.to_string(),
-            &w.ram,
-            &w.benchmark_score.to_string(),
-            &w.ip,
-            &w.last_heartbeat.to_string(),
-            &w.total_points.to_string(),
-            &w.total_tasks.to_string(),
-            &w.known_since.to_string(),
-        ])
-        .unwrap();
+    let records: Vec<Vec<String>>;
+    {
+        let workers = state.workers.read().unwrap();
+        records = workers.values().map(|w| vec![
+            w.worker_id.clone(),
+            w.hostname.clone(),
+            w.os.clone(),
+            w.cpu.clone(),
+            w.cores.to_string(),
+            w.ram.clone(),
+            w.benchmark_score.to_string(),
+            w.ip.clone(),
+            w.last_heartbeat.to_string(),
+            w.total_points.to_string(),
+            w.total_tasks.to_string(),
+            w.known_since.to_string(),
+        ]).collect();
     }
 
-    wtr.flush().unwrap();
+    task::spawn_blocking(move || {
+        let mut wtr = WriterBuilder::new()
+            .has_headers(true)
+            .from_path(WORKER_INFO)
+            .unwrap();
+
+        wtr.write_record(&headers).unwrap();
+
+        for record in records {
+            wtr.write_record(&record).unwrap();
+        }
+
+        wtr.flush().unwrap();
+    }).await.unwrap();
 }
 
 fn load_known_workers(state: &AppState) {
@@ -289,27 +295,27 @@ async fn fault_tolerance_loop(state: AppState) {
                     if let Some(sess_id) = &w.current_session {
                         if let Some(session) = sessions.get(sess_id) {
                             let uptime = current_time - session.connected_at;
+                            let record = vec![
+                                wid.clone(),
+                                sess_id.clone(),
+                                session.connected_at.to_string(),
+                                current_time.to_string(),
+                                uptime.to_string(),
+                                session.tasks_done.to_string(),
+                                session.points.to_string(),
+                            ];
 
-                            let file = OpenOptions::new()
-                                .create(true)
-                                .append(true)
-                                .open(SESSION_LOGS)
-                                .unwrap();
+                            task::spawn_blocking(move || {
+                                let file = OpenOptions::new()
+                                    .create(true)
+                                    .append(true)
+                                    .open(SESSION_LOGS)
+                                    .unwrap();
 
-                            let mut wtr = WriterBuilder::new().has_headers(false).from_writer(file);
-
-                            wtr.write_record(&[
-                                wid,
-                                sess_id,
-                                &session.connected_at.to_string(),
-                                &current_time.to_string(),
-                                &uptime.to_string(),
-                                &session.tasks_done.to_string(),
-                                &session.points.to_string(),
-                            ])
-                            .unwrap();
-
-                            wtr.flush().unwrap();
+                                let mut wtr = WriterBuilder::new().has_headers(false).from_writer(file);
+                                wtr.write_record(&record).unwrap();
+                                wtr.flush().unwrap();
+                            });
                         }
                     }
 
@@ -336,7 +342,7 @@ async fn fault_tolerance_loop(state: AppState) {
         }
 
         if updated {
-            save_worker_info(&state);
+            save_worker_info(&state).await;
         }
     }
 }
@@ -414,7 +420,7 @@ async fn register_worker(
         );
     }
 
-    save_worker_info(&state);
+    save_worker_info(&state).await;
 
     log_print(
         &format!(
@@ -440,13 +446,14 @@ async fn heartbeat(state: web::Data<AppState>, data: web::Json<HeartbeatReq>) ->
 
     let mut workers = state.workers.write().unwrap();
     if let Some(w) = workers.get_mut(&wid) {
-        if w.status != "offline" {
-            w.last_heartbeat = now_ts();
-            return HttpResponse::Ok().json(serde_json::json!({"status": "ok"}));
+        w.last_heartbeat = now_ts();
+        if w.status == "offline" {
+            w.status = "online".to_string();
         }
+        return HttpResponse::Ok().json(serde_json::json!({"status": "ok"}));
     }
 
-    HttpResponse::NotFound().json(serde_json::json!({"error": "Worker not registered or offline"}))
+    HttpResponse::NotFound().json(serde_json::json!({"error": "Worker not registered"}))
 }
 
 #[derive(Deserialize)]
@@ -467,7 +474,7 @@ async fn request_task(state: web::Data<AppState>, data: web::Json<RequestTaskReq
     }
 
     let worker = worker_opt.unwrap();
-    if worker.status == "offline" {
+    if worker.status == "offline" || worker.current_task.is_some() {
         return HttpResponse::Ok().json(serde_json::json!({"task": null}));
     }
 
@@ -536,11 +543,13 @@ async fn task_result(state: web::Data<AppState>, data: web::Json<TaskResultReq>)
     let tid = data.task_id.clone();
 
     let mut pts = 0.0;
+    let mut save_worker = false;
+    let record: Vec<String>;
 
     {
         let mut tasks = state.tasks.write().unwrap();
         let mut workers = state.workers.write().unwrap();
-        let mut sessions = state.sessions.write().unwrap();
+        let mut mut_sessions = state.sessions.write().unwrap();
 
         let task = tasks.get_mut(&tid);
         let worker = workers.get_mut(&wid);
@@ -568,7 +577,7 @@ async fn task_result(state: web::Data<AppState>, data: web::Json<TaskResultReq>)
             worker.total_tasks += 1;
 
             if let Some(sess_id) = &worker.current_session {
-                if let Some(sess) = sessions.get_mut(sess_id) {
+                if let Some(sess) = mut_sessions.get_mut(sess_id) {
                     sess.tasks_done += 1;
                     sess.points += pts;
                 }
@@ -582,12 +591,34 @@ async fn task_result(state: web::Data<AppState>, data: web::Json<TaskResultReq>)
                 "SUCCESS",
             );
 
-            save_worker_info(&state);
+            save_worker = true;
         }
 
-        let session_id = worker.current_session.clone().unwrap_or("".to_string());
+        let session_id = worker.current_session.clone().unwrap_or_else(|| "".to_string());
         let assigned_time = task.assigned_time.unwrap_or(0.0);
 
+        record = vec![
+            now_ts().to_string(),
+            wid.clone(),
+            session_id,
+            tid.clone(),
+            task.task_type.clone(),
+            worker.benchmark_score.to_string(),
+            assigned_time.to_string(),
+            now_ts().to_string(),
+            data.time_taken.to_string(),
+            pts.to_string(),
+            task.status.clone(),
+            task.progress.to_string(),
+            data.error.clone().unwrap_or_else(|| "".to_string()),
+        ];
+    }
+
+    if save_worker {
+        save_worker_info(&state).await;
+    }
+
+    task::spawn_blocking(move || {
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -595,26 +626,9 @@ async fn task_result(state: web::Data<AppState>, data: web::Json<TaskResultReq>)
             .unwrap();
 
         let mut wtr = WriterBuilder::new().has_headers(false).from_writer(file);
-
-        wtr.write_record(&[
-            &now_ts().to_string(),
-            &wid,
-            &session_id,
-            &tid,
-            &task.task_type,
-            &worker.benchmark_score.to_string(),
-            &assigned_time.to_string(),
-            &now_ts().to_string(),
-            &data.time_taken.to_string(),
-            &pts.to_string(),
-            &task.status,
-            &task.progress.to_string(),
-            &data.error.clone().unwrap_or("".to_string()),
-        ])
-        .unwrap();
-
+        wtr.write_record(&record).unwrap();
         wtr.flush().unwrap();
-    }
+    });
 
     HttpResponse::Ok().json(serde_json::json!({
         "status": "ok",

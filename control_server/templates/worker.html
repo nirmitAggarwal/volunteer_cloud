@@ -5,20 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Worker Details</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      .animate-fade-in { animation: fadeIn 0.8s ease-out forwards; opacity: 0; }
+      @keyframes fadeIn { to { opacity: 1; } }
+    </style>
     <script>
       tailwind.config = { darkMode: "class" };
     </script>
   </head>
-  <body class="bg-gray-900 text-white font-sans min-h-screen p-6">
+  <body class="bg-gray-900 text-white font-sans min-h-screen p-4 md:p-6 animate-fade-in">
+    
     <div class="max-w-4xl mx-auto">
       <a
         href="/dashboard"
-        class="text-blue-400 hover:underline mb-4 inline-block"
+        class="text-blue-400 hover:underline mb-4 inline-block transition-all duration-200"
         >← Back to Dashboard</a
       >
 
       <div
-        class="bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg mb-6"
+        class="bg-gray-800 p-4 md:p-6 rounded-lg border border-gray-700 shadow-lg mb-6 transition-all duration-300 hover:shadow-xl"
       >
         <div
           class="flex justify-between items-start mb-6 border-b border-gray-700 pb-4"
@@ -36,7 +41,7 @@
           >
         </div>
 
-        <div class="grid grid-cols-2 gap-4 text-sm">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
           <div>
             <span class="text-gray-500 block">OS Environment</span
             ><span id="w-os" class="font-medium text-gray-200"></span>
@@ -59,7 +64,7 @@
         </div>
 
         <div
-          class="grid grid-cols-3 gap-4 mt-6 p-4 bg-gray-900 rounded-lg border border-gray-700"
+          class="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4 md:mt-6 p-4 bg-gray-900 rounded-lg border border-gray-700 transition-all duration-300 hover:shadow-lg"
         >
           <div class="text-center">
             <div class="text-xs text-gray-500 uppercase">Benchmark</div>

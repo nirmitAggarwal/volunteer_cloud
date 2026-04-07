@@ -11,12 +11,15 @@
       body { font-family: 'Inter', sans-serif; }
       .chart-container { position: relative; height: 250px; width: 100%; }
       .glass-card { background: rgba(31, 41, 55, 0.7); backdrop-filter: blur(10px); }
+      .animate-fade-in { animation: fadeIn 0.8s ease-out forwards; opacity: 0; }
+      @keyframes fadeIn { to { opacity: 1; } }
     </style>
     <script>
       tailwind.config = { darkMode: "class" };
     </script>
   </head>
-  <body class="bg-[#0b0f1a] text-gray-100 min-h-screen pb-12">
+  <body class="bg-[#0b0f1a] text-gray-100 min-h-screen pb-12 animate-fade-in">
+    
     <div class="max-w-7xl mx-auto p-6">
       <header class="flex justify-between items-end mb-10">
         <div>
@@ -34,39 +37,39 @@
                 </span>
                 LIVE SYNC
             </div>
-            <a href="/dashboard" class="bg-gray-800 hover:bg-gray-700 border border-gray-600 px-5 py-2 rounded-lg font-medium transition-all shadow-sm">
+            <a href="/dashboard" class="bg-gray-800 hover:bg-gray-700 border border-gray-600 px-4 md:px-5 py-2 rounded-lg font-medium transition-all duration-200 shadow-sm">
                 Return to Dashboard
             </a>
         </div>
       </header>
 
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
-        <div class="glass-card p-6 rounded-2xl border border-gray-800">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-8 md:mb-10">
+        <div class="glass-card p-4 md:p-6 rounded-2xl border border-gray-800 transition-all duration-300 hover:shadow-lg">
           <p class="text-gray-500 text-xs font-bold uppercase mb-1">Known Workers</p>
           <p class="text-3xl font-bold" id="analysis-workers">--</p>
         </div>
-        <div class="glass-card p-6 rounded-2xl border border-gray-800">
+        <div class="glass-card p-4 md:p-6 rounded-2xl border border-gray-800 transition-all duration-300 hover:shadow-lg">
           <p class="text-gray-500 text-xs font-bold uppercase mb-1">Active Nodes</p>
           <p class="text-3xl font-bold text-blue-400" id="analysis-active">--</p>
         </div>
-        <div class="glass-card p-6 rounded-2xl border border-gray-800">
+        <div class="glass-card p-4 md:p-6 rounded-2xl border border-gray-800 transition-all duration-300 hover:shadow-lg">
           <p class="text-gray-500 text-xs font-bold uppercase mb-1">Total Throughput</p>
           <p class="text-3xl font-bold text-amber-400" id="analysis-tasks">--</p>
         </div>
-        <div class="glass-card p-6 rounded-2xl border border-gray-800">
+        <div class="glass-card p-4 md:p-6 rounded-2xl border border-gray-800 transition-all duration-300 hover:shadow-lg">
           <p class="text-gray-500 text-xs font-bold uppercase mb-1">Aggregated Points</p>
           <p class="text-3xl font-bold text-indigo-400" id="analysis-points">--</p>
         </div>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
-        <div class="glass-card rounded-2xl border border-gray-800 p-6 lg:col-span-1">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 mb-8 md:mb-10">
+        <div class="glass-card rounded-2xl border border-gray-800 p-4 md:p-6 lg:col-span-1 transition-all duration-300 hover:shadow-lg">
           <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Task Distribution</h2>
           <div class="chart-container">
             <canvas id="analysisTaskChart"></canvas>
           </div>
         </div>
-        <div class="glass-card rounded-2xl border border-gray-800 p-6 lg:col-span-2">
+        <div class="glass-card rounded-2xl border border-gray-800 p-4 md:p-6 lg:col-span-2 transition-all duration-300 hover:shadow-lg">
           <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Top Contributing Nodes</h2>
           <div class="chart-container">
             <canvas id="analysisWorkerChart"></canvas>
@@ -74,7 +77,7 @@
         </div>
       </div>
 
-      <div class="glass-card rounded-2xl border border-gray-800 overflow-hidden">
+      <div class="glass-card rounded-2xl border border-gray-800 overflow-hidden transition-all duration-300 hover:shadow-lg">
         <div class="px-6 py-4 border-b border-gray-800 flex justify-between items-center">
             <h2 class="font-semibold">Worker Registry</h2>
             <span class="text-xs text-gray-500" id="worker-count-label">Sorted by Points</span>

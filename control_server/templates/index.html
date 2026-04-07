@@ -6,11 +6,16 @@
     <title>Volunteer Cloud | Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      .animate-fade-in { animation: fadeIn 0.8s ease-out forwards; opacity: 0; }
+      @keyframes fadeIn { to { opacity: 1; } }
+    </style>
     <script>
       tailwind.config = { darkMode: "class" };
     </script>
   </head>
-  <body class="bg-gray-900 text-white font-sans min-h-screen">
+  <body class="bg-gray-900 text-white font-sans min-h-screen animate-fade-in">
+    
     <div class="max-w-7xl mx-auto p-6">
       <div
         class="flex justify-between items-center mb-8 border-b border-gray-700 pb-4"
@@ -27,22 +32,22 @@
         <div class="flex items-center gap-3">
           <a
             href="/analysis"
-            class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded font-semibold transition"
+            class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded font-semibold transition-all duration-200"
           >
             Analysis Page
           </a>
           <button
             onclick="generateTasks()"
-            class="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded font-semibold transition"
+            class="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded font-semibold transition-all duration-200"
           >
             Generate Workload
           </button>
         </div>
       </div>
 
-      <div class="grid grid-cols-4 gap-6 mb-8">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-6 md:mb-8">
         <div
-          class="bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg"
+          class="bg-gray-800 p-4 md:p-6 rounded-lg border border-gray-700 shadow-lg transition-all duration-300 hover:shadow-xl"
         >
           <p class="text-gray-400 text-sm uppercase tracking-wide">
             Connected Workers
@@ -50,7 +55,7 @@
           <p class="text-3xl font-bold text-green-400" id="stat-workers">0</p>
         </div>
         <div
-          class="bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg"
+          class="bg-gray-800 p-4 md:p-6 rounded-lg border border-gray-700 shadow-lg transition-all duration-300 hover:shadow-xl"
         >
           <p class="text-gray-400 text-sm uppercase tracking-wide">
             Tasks (Running/Q)
@@ -58,7 +63,7 @@
           <p class="text-3xl font-bold text-blue-400" id="stat-tasks">0 / 0</p>
         </div>
         <div
-          class="bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg"
+          class="bg-gray-800 p-4 md:p-6 rounded-lg border border-gray-700 shadow-lg transition-all duration-300 hover:shadow-xl"
         >
           <p class="text-gray-400 text-sm uppercase tracking-wide">
             Total System Points
@@ -66,7 +71,7 @@
           <p class="text-3xl font-bold text-yellow-400" id="stat-points">0</p>
         </div>
         <div
-          class="bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg"
+          class="bg-gray-800 p-4 md:p-6 rounded-lg border border-gray-700 shadow-lg transition-all duration-300 hover:shadow-xl"
         >
           <p class="text-gray-400 text-sm uppercase tracking-wide">
             Faults / Requeues
@@ -75,15 +80,15 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-6 mb-8">
-        <div class="bg-gray-800 rounded-lg border border-gray-700 p-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 mb-6 md:mb-8">
+        <div class="bg-gray-800 rounded-lg border border-gray-700 p-4 transition-all duration-300 hover:shadow-lg">
           <h2 class="text-xl font-semibold mb-4 text-gray-200">Task Status</h2>
           <div class="relative h-64 w-full">
             <canvas id="taskStatusChart"></canvas>
           </div>
         </div>
 
-        <div class="bg-gray-800 rounded-lg border border-gray-700 p-4">
+        <div class="bg-gray-800 rounded-lg border border-gray-700 p-4 transition-all duration-300 hover:shadow-lg">
           <h2 class="text-xl font-semibold mb-4 text-gray-200">
             Top Worker Points
           </h2>
@@ -93,9 +98,9 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-3 gap-6">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         <div
-          class="col-span-2 bg-gray-800 rounded-lg border border-gray-700 p-4"
+          class="col-span-1 lg:col-span-2 bg-gray-800 rounded-lg border border-gray-700 p-4 transition-all duration-300 hover:shadow-lg"
         >
           <h2 class="text-xl font-semibold mb-4 text-gray-200">
             Live Worker Fleet
@@ -117,7 +122,7 @@
           </div>
         </div>
 
-        <div class="bg-gray-800 rounded-lg border border-gray-700 p-4">
+        <div class="bg-gray-800 rounded-lg border border-gray-700 p-4 transition-all duration-300 hover:shadow-lg">
           <h2 class="text-xl font-semibold mb-4 text-gray-200">Active Queue</h2>
           <div
             id="task-queue"
@@ -261,7 +266,14 @@
         // Worker Table
         const tbody = document.getElementById("worker-table-body");
         tbody.innerHTML = "";
-        data.workers.forEach((w) => {
+        const sortedWorkers = data.workers.slice().sort((a, b) => {
+          const priority = { online: 0, busy: 1, offline: 2 };
+          const pa = priority[a.status] ?? 3;
+          const pb = priority[b.status] ?? 3;
+          return pa - pb || b.total_points - a.total_points;
+        });
+
+        sortedWorkers.forEach((w) => {
           if (!knownWorkers.has(w.worker_id)) {
             knownWorkers.add(w.worker_id);
             if (w.status === "online" || w.status === "busy")
