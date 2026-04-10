@@ -1,0 +1,18 @@
+# Flask Web Framework
+Flask==3.0.3
+
+# Networking & API
+requests==2.32.3
+axios-python==0.1.0
+
+# Cryptography & Security (Ed25519 signing)
+cryptography==42.0.5
+
+# Terminal Styling
+colorama==0.4.6
+
+# File Handling & Environment
+pathlib==1.0.1
+
+# Server Deployment (Recommended for production-style runs)
+gunicorn==22.0.0

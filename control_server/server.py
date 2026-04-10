@@ -116,11 +116,9 @@ def compute_sha256(filepath):
     with open(filepath, 'rb') as f:
         return hashlib.sha256(f.read()).hexdigest()
 
-
 def sign_manifest(private_key, manifest_data):
     encoded = json.dumps(manifest_data, sort_keys=True, separators=(',', ':')).encode('utf-8')
     return private_key.sign(encoded)
-
 
 def load_private_key():
     with open(PRIVATE_KEY_PATH, 'rb') as f:
@@ -130,7 +128,6 @@ def load_private_key():
 def load_public_key():
     with open(PUBLIC_KEY_PATH, 'rb') as f:
         return serialization.load_pem_public_key(f.read())
-
 
 def ensure_plugin_bundles():
     private_key = load_private_key()
@@ -173,7 +170,6 @@ def ensure_plugin_bundles():
         with open(sig_path, 'wb') as f:
             f.write(signature)
 
-
 def load_plugin_store():
     for plugin_folder in Path(PLUGIN_DIR).iterdir():
         if not plugin_folder.is_dir():
@@ -194,7 +190,6 @@ def load_plugin_store():
             'sha256': manifest.get('sha256'),
             'task_type': manifest.get('task_type', manifest['plugin_id'])
         }
-
 
 ensure_plugin_bundles()
 load_plugin_store()
@@ -483,4 +478,5 @@ def worker_page(wid): return render_template('worker.html', wid=wid)
 
 if __name__ == '__main__':
     log_print("Starting Volunteer Cloud Controller...", "INFO")
-    app.run(host='0.0.0.0', port=3000, threaded=True)
+    port = int(os.environ.get("PORT", 3000))
+    app.run(host='0.0.0.0', port=port)
