@@ -1,0 +1,15 @@
+{
+  "plugin_id": "monte_carlo_pi",
+  "version": 1,
+  "entrypoint": "plugin.py",
+  "task_type": "monte_carlo_pi",
+  "description": "monte carlo pi estimation plugin",
+  "platform": "python",
+  "timeout_sec": 120,
+  "sha256": "0c1714b9e2a337ea14c9cbc5ca10edd9e516226496ddca0c475d77affb585d2e",
+  "created_at": 1775807925,
+  "args": [
+    "--difficulty",
+    "--output"
+  ]
+}

@@ -1,5 +1,0 @@
-worker_id,hostname,os,cpu,cores,ram,benchmark_score,ip,last_seen,total_points,total_tasks,known_since
-5bd4fa0f,MJ,Windows 11,"Intel64 Family 6 Model 170 Stepping 4, GenuineIntel",18,15.4 GB,88441,192.168.1.46,1775534161.57648,6473.8812,7,1775533345.0693057
-04cb6087,MJ,Windows 11,"Intel64 Family 6 Model 170 Stepping 4, GenuineIntel",18,15.4 GB,83095,192.168.1.46,0,2085.6845000000003,3,1775531748.6141434
-afd32763,nirmit,Windows 11,"Intel64 Family 6 Model 140 Stepping 1, GenuineIntel",8,15.7 GB,111406,192.168.1.48,0,5470.0346,2,1775531731.2153678
-6bb2a236,nirmit,Windows 11,"Intel64 Family 6 Model 140 Stepping 1, GenuineIntel",8,15.7 GB,129619,192.168.1.48,1775534166.922244,2410.9134,3,1775533400.7730758

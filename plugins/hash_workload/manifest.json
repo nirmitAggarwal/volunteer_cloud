@@ -1,0 +1,15 @@
+{
+  "plugin_id": "hash_workload",
+  "version": 1,
+  "entrypoint": "plugin.py",
+  "task_type": "hash_workload",
+  "description": "cryptographic hash chain workload plugin",
+  "platform": "python",
+  "timeout_sec": 120,
+  "sha256": "a04e646585cd72324dc31fb20d2e81a6a4318e94249c155d7f9cc3e9be439109",
+  "created_at": 1775807925,
+  "args": [
+    "--difficulty",
+    "--output"
+  ]
+}

@@ -2,13 +2,20 @@ import os
 import sys
 import time
 import uuid
+import json
 import psutil
 import socket
 import platform
 import hashlib
+import subprocess
 import requests
 import threading
 import random
+from pathlib import Path
+from typing import cast
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.exceptions import InvalidSignature
 from colorama import init, Fore, Style
 
 # Initialize terminal colors
@@ -18,7 +25,7 @@ init(autoreset=True)
 # CONFIGURATION
 # ==========================================
 # Change this to the IP of the Server Laptop or set VOLUNTEER_SERVER_URL
-SERVER_URL = os.environ.get("VOLUNTEER_SERVER_URL", "http://192.168.1.48:3000")
+SERVER_URL = os.environ.get("VOLUNTEER_SERVER_URL", "http://localhost:3000")
 WORKER_ID = str(uuid.uuid4())[:8]
 
 # ==========================================
@@ -47,66 +54,130 @@ def get_specs():
     }
 
 # ==========================================
-# TASK WORKLOAD FUNCTIONS
+# PLUGIN MANAGEMENT
 # ==========================================
-def compute_primes(limit, update_progress):
-    """CPU-heavy integer math."""
-    primes = []
-    for i in range(2, limit):
-        if i % (limit // 10) == 0: 
-            update_progress(int((i / limit) * 100))
-        is_p = True
-        for j in range(2, int(i**0.5) + 1):
-            if i % j == 0:
-                is_p = False
-                break
-        if is_p: primes.append(i)
-    return len(primes)
+ADMIN_PUBLIC_KEY_PEM = """-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAHekZvoRFgefh0hkfcBcVFdMiiycmPm3wSy/7+Fya08Y=\n-----END PUBLIC KEY-----\n"""
+PLUGIN_CACHE_DIR = Path(__file__).resolve().parent / 'plugin_cache'
+PLUGIN_CACHE_DIR.mkdir(exist_ok=True)
+JOB_DIR = Path(__file__).resolve().parent / 'job_runs'
+JOB_DIR.mkdir(exist_ok=True)
 
-def compute_matrix(size, update_progress):
-    """Memory bandwidth and floating-point heavy."""
-    mat1 = [[random.random() for _ in range(size)] for _ in range(size)]
-    mat2 = [[random.random() for _ in range(size)] for _ in range(size)]
-    res = [[0]*size for _ in range(size)]
-    
-    for i in range(size):
-        if i % (size // 10) == 0: 
-            update_progress(int((i / size) * 100))
-        for j in range(size):
-            for k in range(size): 
-                res[i][j] += mat1[i][k] * mat2[k][j]
-    return "Matrix Computed"
 
-def compute_hash(iterations, update_progress):
-    """Cryptographic ALU stress test."""
-    last_hash = "start"
-    for i in range(iterations):
-        if i % (iterations // 10) == 0: 
-            update_progress(int((i / iterations) * 100))
-        last_hash = hashlib.sha256((last_hash + str(i)).encode()).hexdigest()
-    return last_hash
+def load_public_key():
+    public_key = load_pem_public_key(ADMIN_PUBLIC_KEY_PEM.encode('utf-8'))
+    public_key = cast(Ed25519PublicKey, public_key)
+    if not isinstance(public_key, Ed25519PublicKey):
+        raise RuntimeError('Loaded public key is not Ed25519')
+    return public_key
 
-def compute_sort(array_size, update_progress):
-    """Memory allocation and sorting algorithm stress."""
-    update_progress(10)
-    arr = [random.randint(1, 100000) for _ in range(array_size)]
-    update_progress(40)
-    arr.sort() # Python's Timsort
-    update_progress(90)
-    return "Array Sorted"
 
-def compute_monte_carlo_pi(iterations, update_progress):
-    """Stochastic simulation for Pi estimation."""
-    inside_circle = 0
-    for i in range(iterations):
-        if i % (iterations // 10) == 0: 
-            update_progress(int((i / iterations) * 100))
-        x, y = random.random(), random.random()
-        if x**2 + y**2 <= 1:
-            inside_circle += 1
-    
-    pi_estimate = (inside_circle / iterations) * 4
-    return pi_estimate
+def verify_manifest_signature(manifest_data, signature_bytes):
+    try:
+        public_key = load_public_key()
+        # Canonicalize the manifest data before verifying to match server-side signing
+        encoded = json.dumps(manifest_data, sort_keys=True, separators=(',', ':')).encode('utf-8')
+        public_key.verify(signature_bytes, encoded)
+        return True
+    except InvalidSignature:
+        return False
+
+
+def download_file(url, dest_path, binary=True):
+    if url.startswith('/'):
+        url = f"{SERVER_URL.rstrip('/')}{url}"
+    resp = requests.get(url, timeout=10)
+    resp.raise_for_status()
+    mode = 'wb' if binary else 'w'
+    encoding = None if binary else 'utf-8'
+    with open(dest_path, mode, encoding=encoding) as f:
+        f.write(resp.content if binary else resp.text)
+
+
+def ensure_plugin_bundle(task):
+    plugin_id = task.get('plugin_id') or task.get('task_type')
+    if not plugin_id:
+        raise RuntimeError('No plugin_id on task')
+
+    plugin_dir = PLUGIN_CACHE_DIR / plugin_id
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest_path = plugin_dir / 'manifest.json'
+    signature_path = plugin_dir / 'manifest.sig'
+    plugin_path = plugin_dir / task.get('entrypoint', 'plugin.py')
+
+    if not manifest_path.exists() or not signature_path.exists() or not plugin_path.exists():
+        download_file(task['manifest_url'], manifest_path, binary=False)
+        download_file(task['signature_url'], signature_path, binary=True)
+        download_file(task['plugin_url'], plugin_path, binary=True)
+
+    try:
+        manifest_bytes = manifest_path.read_bytes()
+        signature_bytes = signature_path.read_bytes()
+        
+        manifest = json.loads(manifest_bytes.decode('utf-8'))
+        if not verify_manifest_signature(manifest, signature_bytes):
+            raise RuntimeError('Manifest signature verification failed')
+
+        plugin_hash = hashlib.sha256(plugin_path.read_bytes()).hexdigest()
+        if plugin_hash != manifest['sha256']:
+            raise RuntimeError('Plugin hash mismatch')
+            
+    except (RuntimeError, json.JSONDecodeError, InvalidSignature) as e:
+        # Clear cache on verification failure so we re-download next time
+        print(f"{Fore.RED}Verification failed, clearing cache for {plugin_id}: {e}{Style.RESET_ALL}")
+        if manifest_path.exists(): manifest_path.unlink()
+        if signature_path.exists(): signature_path.unlink()
+        if plugin_path.exists(): plugin_path.unlink()
+        raise e
+
+    return plugin_path, manifest
+
+
+def send_progress(task_id, progress):
+    try:
+        requests.post(f"{SERVER_URL}/api/progress_update", json={"task_id": task_id, "progress": progress}, timeout=2)
+    except Exception:
+        pass
+
+
+def execute_plugin(task):
+    plugin_path, manifest = ensure_plugin_bundle(task)
+    task_folder = JOB_DIR / task['task_id']
+    task_folder.mkdir(parents=True, exist_ok=True)
+    output_path = task_folder / 'output.json'
+
+    cmd = [sys.executable, str(plugin_path), '--difficulty', str(task['difficulty']), '--output', str(output_path)]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    start_time = time.time()
+    timeout_sec = task.get('timeout_sec', manifest.get('timeout_sec', 120))
+
+    stdout = proc.stdout
+    if stdout is None:
+        proc.kill()
+        raise RuntimeError('Plugin stdout is unavailable')
+
+    while True:
+        line = stdout.readline()
+        if line:
+            if line.startswith('PROGRESS:'):
+                try:
+                    pct = int(line.split(':', 1)[1].strip())
+                    send_progress(task['task_id'], pct)
+                except ValueError:
+                    pass
+            else:
+                print(line.strip())
+        elif proc.poll() is not None:
+            break
+
+        if time.time() - start_time > timeout_sec:
+            proc.kill()
+            raise RuntimeError('Plugin execution timed out')
+
+    if proc.returncode != 0:
+        raise RuntimeError(f'Plugin exited with code {proc.returncode}')
+
+    return output_path
 
 # ==========================================
 # COMMUNICATION LOOPS
@@ -137,49 +208,25 @@ def task_loop():
             tid = task['task_id']
             diff = task['difficulty']
             
-            # Helper function to send progress to server
-            def update_prog(pct):
-                try: 
-                    requests.post(f"{SERVER_URL}/api/progress_update", json={"task_id": tid, "progress": pct}, timeout=2)
-                except: 
-                    pass
-
-            # Execute the specific task type
             try:
-                if task['task_type'] == 'prime_number': 
-                    compute_primes(diff, update_prog)
-                elif task['task_type'] == 'matrix_multiplication': 
-                    compute_matrix(diff, update_prog)
-                elif task['task_type'] == 'hash_workload': 
-                    compute_hash(diff, update_prog)
-                elif task['task_type'] == 'sort_arrays': 
-                    compute_sort(diff, update_prog)
-                elif task['task_type'] == 'monte_carlo_pi':
-                    compute_monte_carlo_pi(diff, update_prog)
-                else:
-                    # Fallback for unknown tasks
-                    time.sleep(2)
-                    update_prog(100)
-                
+                output_path = execute_plugin(task)
                 duration = round(time.time() - start_t, 2)
-                
-                # Send Success Result
+
                 requests.post(f"{SERVER_URL}/api/task_result", json={
-                    "worker_id": WORKER_ID, 
-                    "task_id": tid, 
-                    "success": True, 
-                    "time_taken": duration
+                    "worker_id": WORKER_ID,
+                    "task_id": tid,
+                    "success": True,
+                    "time_taken": duration,
+                    "output_file": str(output_path)
                 })
                 print(f"{Fore.GREEN}[SUCCESS]{Style.RESET_ALL} Task completed in {duration}s")
-                
             except Exception as e:
-                # Handle unexpected math/memory errors without crashing worker
                 print(f"{Fore.RED}[ERROR] Task failed: {e}{Style.RESET_ALL}")
                 requests.post(f"{SERVER_URL}/api/task_result", json={
-                    "worker_id": WORKER_ID, 
-                    "task_id": tid, 
-                    "success": False, 
-                    "time_taken": 0, 
+                    "worker_id": WORKER_ID,
+                    "task_id": tid,
+                    "success": False,
+                    "time_taken": 0,
                     "error": str(e)
                 })
 

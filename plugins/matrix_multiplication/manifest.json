@@ -1,0 +1,15 @@
+{
+  "plugin_id": "matrix_multiplication",
+  "version": 1,
+  "entrypoint": "plugin.py",
+  "task_type": "matrix_multiplication",
+  "description": "matrix multiplication workload plugin",
+  "platform": "python",
+  "timeout_sec": 120,
+  "sha256": "085e21d8f8ffb8900c619d2a70fa94a7b7e8421fa2691959557b5999e4ccd592",
+  "created_at": 1775807925,
+  "args": [
+    "--difficulty",
+    "--output"
+  ]
+}

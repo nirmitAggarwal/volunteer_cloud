@@ -1,4 +1,1 @@
 worker_id,hostname,os,cpu,cores,ram,benchmark_score,ip,last_seen,total_points,total_tasks,known_since
-dd10e097,nirmit,Windows 11 Pro (10.0.22621),Intel(R) Core(TM) i7-1185G7,8,15.7 GB,89391,192.168.1.48,1712512345.12,8837.00,12,1712509000.00
-a7bb5db4,MJ,Windows 10 Pro,Intel(R) Core(TM) i5-1035G1,4,7.9 GB,147754,192.168.1.52,1712512000.45,2703.00,5,1712508000.00
-e2d08b1e,devbox,Ubuntu 24.04 LTS,AMD Ryzen 7 5800U,16,31.2 GB,13443,192.168.1.53,1712511500.33,13443.00,8,1712507000.00

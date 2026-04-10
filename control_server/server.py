@@ -2,10 +2,15 @@ import os
 import csv
 import time
 import uuid
+import json
 import logging
 import threading
+import hashlib
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify
+from pathlib import Path
+from flask import Flask, render_template, request, jsonify, send_from_directory
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives import serialization
 from colorama import init, Fore, Style
 
 # Initialize terminal colors
@@ -15,17 +20,26 @@ app = Flask(__name__)
 log = logging.getLogger('werkzeug')
 log.disabled = True # Disable default flask logs for custom clean logs
 
-STORAGE_DIR = 'storage'
-WORKER_LOGS = os.path.join(STORAGE_DIR, 'worker_logs.csv')
-SESSION_LOGS = os.path.join(STORAGE_DIR, 'session_logs.csv')
-WORKER_INFO = os.path.join(STORAGE_DIR, 'worker_info.csv')
-os.makedirs(STORAGE_DIR, exist_ok=True)
+BASE_DIR = Path(__file__).resolve().parent.parent
+CONTROL_DIR = Path(__file__).resolve().parent
+STORAGE_DIR = CONTROL_DIR / 'storage'
+WORKER_LOGS = STORAGE_DIR / 'worker_logs.csv'
+SESSION_LOGS = STORAGE_DIR / 'session_logs.csv'
+WORKER_INFO = STORAGE_DIR / 'worker_info.csv'
+PLUGIN_DIR = BASE_DIR / 'plugins'
+KEY_DIR = CONTROL_DIR / 'keys'
+PRIVATE_KEY_PATH = KEY_DIR / 'admin_private_key.pem'
+PUBLIC_KEY_PATH = KEY_DIR / 'admin_public_key.pem'
+STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
+KEY_DIR.mkdir(parents=True, exist_ok=True)
 
 # In-Memory State
 state_lock = threading.RLock()
 workers = {} # worker_id -> dict
 tasks = {}   # task_id -> dict
 sessions = {} # session_id -> dict
+plugins = {} # plugin_id -> metadata
 
 # --- CSV Initialization ---
 def init_csv(filepath, headers):
@@ -97,6 +111,94 @@ def load_known_workers():
         }
 load_known_workers()
 
+
+def compute_sha256(filepath):
+    with open(filepath, 'rb') as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def sign_manifest(private_key, manifest_data):
+    encoded = json.dumps(manifest_data, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    return private_key.sign(encoded)
+
+
+def load_private_key():
+    with open(PRIVATE_KEY_PATH, 'rb') as f:
+        return serialization.load_pem_private_key(f.read(), password=None)
+
+
+def load_public_key():
+    with open(PUBLIC_KEY_PATH, 'rb') as f:
+        return serialization.load_pem_public_key(f.read())
+
+
+def ensure_plugin_bundles():
+    private_key = load_private_key()
+    plugin_definitions = [
+        ('prime_number', 'cpu-heavy prime count plugin'),
+        ('matrix_multiplication', 'matrix multiplication workload plugin'),
+        ('hash_workload', 'cryptographic hash chain workload plugin'),
+        ('sort_arrays', 'sort large random arrays plugin'),
+        ('monte_carlo_pi', 'monte carlo pi estimation plugin')
+    ]
+
+    for plugin_id, description in plugin_definitions:
+        plugin_dir = Path(PLUGIN_DIR) / plugin_id
+        plugin_path = plugin_dir / 'plugin.py'
+        manifest_path = plugin_dir / 'manifest.json'
+        sig_path = plugin_dir / 'manifest.sig'
+
+        if not plugin_dir.exists():
+            continue
+        if not plugin_path.exists():
+            continue
+
+        manifest = {
+            'plugin_id': plugin_id,
+            'version': 1,
+            'entrypoint': 'plugin.py',
+            'task_type': plugin_id,
+            'description': description,
+            'platform': 'python',
+            'timeout_sec': 120,
+            'sha256': compute_sha256(plugin_path),
+            'created_at': int(time.time()),
+            'args': ['--difficulty', '--output']
+        }
+
+        with open(manifest_path, 'w', encoding='utf-8') as f:
+            json.dump(manifest, f, indent=2)
+
+        signature = sign_manifest(private_key, manifest)
+        with open(sig_path, 'wb') as f:
+            f.write(signature)
+
+
+def load_plugin_store():
+    for plugin_folder in Path(PLUGIN_DIR).iterdir():
+        if not plugin_folder.is_dir():
+            continue
+        manifest_path = plugin_folder / 'manifest.json'
+        if not manifest_path.exists():
+            continue
+        with open(manifest_path, 'r', encoding='utf-8') as f:
+            manifest = json.load(f)
+
+        plugins[manifest['plugin_id']] = {
+            'plugin_id': manifest['plugin_id'],
+            'entrypoint': manifest['entrypoint'],
+            'plugin_url': f"/download/plugins/{manifest['plugin_id']}/{manifest['entrypoint']}",
+            'manifest_url': f"/download/plugins/{manifest['plugin_id']}/manifest.json",
+            'signature_url': f"/download/plugins/{manifest['plugin_id']}/manifest.sig",
+            'timeout_sec': manifest.get('timeout_sec', 120),
+            'sha256': manifest.get('sha256'),
+            'task_type': manifest.get('task_type', manifest['plugin_id'])
+        }
+
+
+ensure_plugin_bundles()
+load_plugin_store()
+
 def log_print(msg, level="INFO"):
     colors = {"INFO": Fore.CYAN, "SUCCESS": Fore.GREEN, "WARN": Fore.YELLOW, "ERROR": Fore.RED, "TASK": Fore.MAGENTA}
     color = colors.get(level, Fore.WHITE)
@@ -158,6 +260,16 @@ def get_best_task_for_worker(worker):
         return pending_tasks[-1] # Give easiest task to weak worker
 
 # --- API Endpoints ---
+@app.route('/download/plugins/<plugin_id>/<path:filename>')
+def download_plugin_file(plugin_id, filename):
+    plugin_dir = PLUGIN_DIR / plugin_id
+    return send_from_directory(str(plugin_dir), filename, as_attachment=False)
+
+@app.route('/api/public_key')
+def public_key():
+    with open(PUBLIC_KEY_PATH, 'rb') as f:
+        return f.read(), 200, {'Content-Type': 'application/octet-stream'}
+
 @app.route('/api/register_worker', methods=['POST'])
 def register_worker():
     data = request.json
@@ -217,7 +329,17 @@ def request_task():
             workers[wid]['current_task'] = task['task_id']
             workers[wid]['status'] = 'busy'
             log_print(f"Assigned {task['task_type']} to {workers[wid]['hostname']}", "TASK")
-            return jsonify({"task": task})
+            plugin_meta = plugins.get(task.get('plugin_id') or task.get('task_type')) or {}
+            task_payload = task.copy()
+            task_payload.update({
+                'plugin_id': plugin_meta.get('plugin_id'),
+                'plugin_url': plugin_meta.get('plugin_url'),
+                'manifest_url': plugin_meta.get('manifest_url'),
+                'signature_url': plugin_meta.get('signature_url'),
+                'entrypoint': plugin_meta.get('entrypoint'),
+                'timeout_sec': plugin_meta.get('timeout_sec', 120)
+            })
+            return jsonify({"task": task_payload})
     return jsonify({"task": None})
 
 @app.route('/api/progress_update', methods=['POST'])
@@ -243,7 +365,7 @@ def task_result():
         
         if not task or not worker: return jsonify({"error": "Invalid state"})
         
-        pts = (worker['benchmark_score'] * time_taken / 100) if success else 0
+        pts = (worker['benchmark_score'] * time_taken / 1000) if success else 0
         task.update({
             "status": "completed" if success else "failed",
             "progress": 100 if success else task['progress'],
@@ -273,21 +395,31 @@ def task_result():
 @app.route('/api/generate_tasks', methods=['POST'])
 def generate_tasks():
     import random
-    types = [
-        ("prime_number", 50000, 10), ("matrix_multiplication", 300, 15), 
-        ("hash_workload", 200000, 5), ("sort_arrays", 1000000, 8)
+    available = [
+        ('prime_number', 50000, 10),
+        ('matrix_multiplication', 300, 15),
+        ('hash_workload', 200000, 5),
+        ('sort_arrays', 1000000, 8),
+        ('monte_carlo_pi', 200000, 7),
     ]
     with state_lock:
         for _ in range(5):
-            t_type, work_units, cost = random.choice(types)
+            plugin_id, work_units, cost = random.choice(available)
             tid = str(uuid.uuid4())[:8]
             tasks[tid] = {
-                "task_id": tid, "task_type": t_type, "difficulty": work_units,
-                "estimated_compute_cost": cost, "status": "queued", "progress": 0,
-                "assigned_worker_id": None, "retries_count": 0, "created_time": time.time()
+                'task_id': tid,
+                'task_type': plugin_id,
+                'plugin_id': plugin_id,
+                'difficulty': work_units,
+                'estimated_compute_cost': cost,
+                'status': 'queued',
+                'progress': 0,
+                'assigned_worker_id': None,
+                'retries_count': 0,
+                'created_time': time.time()
             }
-    log_print("Generated 5 random tasks in queue.", "INFO")
-    return jsonify({"status": "generated"})
+    log_print('Generated 5 random tasks in queue.', 'INFO')
+    return jsonify({'status': 'generated'})
 
 # --- Dashboard APIs ---
 @app.route('/api/system_stats')
@@ -332,6 +464,11 @@ def analysis_data():
             ]
         }
     return jsonify(stats)
+
+@app.route('/api/plugins')
+def plugin_list():
+    with state_lock:
+        return jsonify(list(plugins.values()))
 
 @app.route('/analysis')
 def analysis_page():

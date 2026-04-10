@@ -1,0 +1,15 @@
+{
+  "plugin_id": "sort_arrays",
+  "version": 1,
+  "entrypoint": "plugin.py",
+  "task_type": "sort_arrays",
+  "description": "sort large random arrays plugin",
+  "platform": "python",
+  "timeout_sec": 120,
+  "sha256": "1524b1149116cbf5bccaba57e77d98c662b393c37bf63eaad631a4bed358df35",
+  "created_at": 1775807925,
+  "args": [
+    "--difficulty",
+    "--output"
+  ]
+}

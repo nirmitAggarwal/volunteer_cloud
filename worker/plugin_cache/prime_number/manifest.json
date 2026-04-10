@@ -1,0 +1,15 @@
+{
+  "plugin_id": "prime_number",
+  "version": 1,
+  "entrypoint": "plugin.py",
+  "task_type": "prime_number",
+  "description": "cpu-heavy prime count plugin",
+  "platform": "python",
+  "timeout_sec": 120,
+  "sha256": "3eda109da8ac92365c067cb4e57b69868afb5aeed502694ad114ad29d38ed681",
+  "created_at": 1775807925,
+  "args": [
+    "--difficulty",
+    "--output"
+  ]
+}

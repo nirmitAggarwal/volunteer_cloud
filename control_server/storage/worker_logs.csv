@@ -1,4 +1,1 @@
 timestamp,worker_id,session_id,task_id,task_type,benchmark_score,start_time,end_time,time_taken,points_earned,status,progress_last_seen,error_message
-1712512345.12,dd10e097,5d2a5f1b-4e6a-4cbc-8d84-1f0d91234567,7c0bfcf0,matrix_multiplication,89391,1712512337.35,1712512345.12,7.77,6964.75,completed,100,
-1712512000.45,a7bb5db4,2c3b6d7e-8f5a-4c1b-9d1f-123456789abc,e40c6446,prime_number,147754,1712511975.00,1712512000.45,25.45,3764.47,completed,100,
-1712511500.33,e2d08b1e,9fa1b2c3-4d5e-6f70-8a9b-0c1d2e3f4b5c,aff2ec6f,sort_arrays,13443,1712511460.00,1712511500.33,40.33,541.90,completed,100,
