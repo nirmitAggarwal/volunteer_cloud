@@ -1,0 +1,5 @@
+plugin_cache/*
+job_runs/*
+
+!plugin_cache/.gitkeep
+!job_runs/.gitkeep

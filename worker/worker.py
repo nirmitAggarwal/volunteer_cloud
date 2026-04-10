@@ -25,7 +25,7 @@ init(autoreset=True)
 # CONFIGURATION
 # ==========================================
 # Change this to the IP of the Server Laptop or set VOLUNTEER_SERVER_URL
-SERVER_URL = os.environ.get("VOLUNTEER_SERVER_URL", "http://localhost:3000")
+SERVER_URL = os.environ.get("VOLUNTEER_SERVER_URL", "https://volunteer-cloud.onrender.com/")
 WORKER_ID = str(uuid.uuid4())[:8]
 
 # ==========================================
